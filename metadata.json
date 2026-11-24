@@ -1,0 +1,6 @@
+{
+  "name": "EcoGestión Santa María",
+  "description": "Aplicación PWA móvil para la Oficina de Ambiente de la Municipalidad de Santa María, Catamarca. Gestión de barrido colaborativo, registro de contenedores y monitoreo GPS.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

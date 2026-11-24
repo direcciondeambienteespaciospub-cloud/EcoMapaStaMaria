@@ -1,0 +1,244 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Primitive Helpers ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'direcciondeambienteespaciospub@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidHexColor(c) {
+      return c is string && c.size() == 7 && c.matches('^#[0-9A-Fa-f]{6}$');
+    }
+
+    // --- Validation Helpers ---
+    function isValidEmployeePublic(data) {
+      return data.keys().hasAll(['uid', 'firstName', 'lastName', 'fullName', 'color', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'firstName', 'lastName', 'fullName', 'color', 'createdAt']) &&
+        isValidId(data.uid) &&
+        data.firstName is string && data.firstName.size() >= 2 && data.firstName.size() <= 60 &&
+        data.lastName is string && data.lastName.size() >= 1 && data.lastName.size() <= 60 &&
+        data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 120 &&
+        isValidHexColor(data.color) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidEmployeePrivate(data) {
+      return data.keys().hasAll(['uid', 'dni', 'phone', 'birthDate', 'pin']) &&
+        data.keys().hasOnly(['uid', 'dni', 'phone', 'birthDate', 'pin']) &&
+        isValidId(data.uid) &&
+        data.dni is string && data.dni.size() >= 4 && data.dni.size() <= 20 &&
+        data.phone is string && data.phone.size() >= 6 && data.phone.size() <= 30 &&
+        data.birthDate is string && data.birthDate.size() == 10 && data.birthDate.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
+        data.pin is string && data.pin.size() >= 4 && data.pin.size() <= 32;
+    }
+
+    function isValidAdminProfile(data) {
+      return data.keys().hasAll(['fullName', 'roleTitle', 'phone', 'email', 'masterKey']) &&
+        data.keys().hasOnly(['fullName', 'roleTitle', 'phone', 'email', 'masterKey']) &&
+        data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 120 &&
+        data.roleTitle is string && data.roleTitle.size() >= 2 && data.roleTitle.size() <= 160 &&
+        data.phone is string && data.phone.size() <= 30 &&
+        data.email is string && data.email.size() <= 160 &&
+        data.masterKey is string && data.masterKey.size() >= 4 && data.masterKey.size() <= 64;
+    }
+
+    function isValidPointList(pts) {
+      return pts is list &&
+        pts.size() >= 1 &&
+        pts.size() <= 500 &&
+        pts[0] is map &&
+        pts[0].keys().hasAll(['lat', 'lng']) &&
+        pts[0].keys().hasOnly(['lat', 'lng']) &&
+        pts[0].lat is number &&
+        pts[0].lng is number;
+    }
+
+    function isValidSweeperSession(data) {
+      return data.keys().hasAll(['employeeId', 'employeeName', 'employeeColor', 'role', 'active', 'startedAt', 'lastUpdatedAt', 'points', 'distanceMeters']) &&
+        data.keys().hasOnly(['employeeId', 'employeeName', 'employeeColor', 'role', 'active', 'startedAt', 'lastUpdatedAt', 'endedAt', 'points', 'distanceMeters']) &&
+        isValidId(data.employeeId) &&
+        data.employeeName is string && data.employeeName.size() >= 2 && data.employeeName.size() <= 120 &&
+        isValidHexColor(data.employeeColor) &&
+        data.role == 'barredor' &&
+        data.active is bool &&
+        data.startedAt is timestamp &&
+        data.lastUpdatedAt is timestamp &&
+        (!('endedAt' in data) || data.endedAt is timestamp) &&
+        isValidPointList(data.points) &&
+        data.distanceMeters is number && data.distanceMeters >= 0 && data.distanceMeters <= 500000;
+    }
+
+    function isValidCollectorSession(data) {
+      return data.keys().hasAll(['employeeId', 'employeeName', 'employeeColor', 'role', 'active', 'startedAt', 'lastUpdatedAt', 'currentLat', 'currentLng']) &&
+        data.keys().hasOnly(['employeeId', 'employeeName', 'employeeColor', 'role', 'active', 'startedAt', 'lastUpdatedAt', 'currentLat', 'currentLng']) &&
+        isValidId(data.employeeId) &&
+        data.employeeName is string && data.employeeName.size() >= 2 && data.employeeName.size() <= 120 &&
+        isValidHexColor(data.employeeColor) &&
+        data.role == 'recolector' &&
+        data.active is bool &&
+        data.startedAt is timestamp &&
+        data.lastUpdatedAt is timestamp &&
+        data.currentLat is number &&
+        data.currentLng is number;
+    }
+
+    function isValidContainer(data) {
+      return data.keys().hasAll(['employeeId', 'employeeName', 'createdAt', 'barrio', 'reference', 'locationSource', 'status', 'comment']) &&
+        data.keys().hasOnly(['employeeId', 'employeeName', 'createdAt', 'barrio', 'reference', 'lat', 'lng', 'locationSource', 'status', 'comment', 'photoDataUrl']) &&
+        isValidId(data.employeeId) &&
+        data.employeeName is string && data.employeeName.size() >= 2 && data.employeeName.size() <= 120 &&
+        data.createdAt is timestamp &&
+        data.barrio is string && data.barrio.size() >= 2 && data.barrio.size() <= 80 &&
+        data.reference is string && data.reference.size() >= 1 && data.reference.size() <= 200 &&
+        (!('lat' in data) || data.lat == null || data.lat is number) &&
+        (!('lng' in data) || data.lng == null || data.lng is number) &&
+        data.locationSource in ['gps', 'manual'] &&
+        data.status in ['optimo', 'lleno', 'danado', 'desbordado'] &&
+        data.comment is string && data.comment.size() <= 500 &&
+        (!('photoDataUrl' in data) || (data.photoDataUrl is string && data.photoDataUrl.size() <= 350000));
+    }
+
+    // --- Collection Rules ---
+    match /test/connection {
+      allow get: if isSignedIn();
+    }
+
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isValidId(adminId) && (adminId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && request.auth.token.email == 'direcciondeambienteespaciospub@gmail.com';
+      allow create, update, delete: if isAdmin() && isValidId(adminId);
+    }
+
+    match /settings/{settingId} {
+      allow get: if isAdmin() && isValidId(settingId);
+      allow list: if isSignedIn() && request.auth.token.email == 'direcciondeambienteespaciospub@gmail.com';
+      allow create, update: if isAdmin() && isValidId(settingId) && settingId == 'adminProfile' && isValidAdminProfile(incoming());
+      allow delete: if false;
+    }
+
+    match /employees/{employeeId} {
+      allow get: if isSignedIn() && isValidId(employeeId);
+      allow list: if isSignedIn() && resource.data.uid >= '';
+      allow create: if isSignedIn() &&
+        isValidId(employeeId) &&
+        isValidEmployeePublic(incoming()) &&
+        ((incoming().uid == request.auth.uid && employeeId == request.auth.uid) || isAdmin()) &&
+        incoming().createdAt == request.time;
+      allow update: if isSignedIn() &&
+        isValidId(employeeId) &&
+        isValidEmployeePublic(incoming()) &&
+        (isAdmin() || (existing().uid == request.auth.uid && incoming().uid == existing().uid)) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['firstName', 'lastName', 'fullName', 'color']);
+      allow delete: if isAdmin() && isValidId(employeeId);
+
+      match /private/{docId} {
+        allow get: if isSignedIn() && isValidId(employeeId) && docId == 'info' && (employeeId == request.auth.uid || isAdmin());
+        allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || request.auth.token.email == 'direcciondeambienteespaciospub@gmail.com');
+        allow create: if isSignedIn() &&
+          isValidId(employeeId) &&
+          docId == 'info' &&
+          (employeeId == request.auth.uid || isAdmin()) &&
+          isValidEmployeePrivate(incoming()) &&
+          incoming().uid == employeeId;
+        allow update: if isSignedIn() &&
+          isValidId(employeeId) &&
+          docId == 'info' &&
+          (employeeId == request.auth.uid || isAdmin()) &&
+          isValidEmployeePrivate(incoming()) &&
+          incoming().uid == existing().uid &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['dni', 'phone', 'birthDate', 'pin']);
+        allow delete: if isAdmin() && isValidId(employeeId) && docId == 'info';
+      }
+    }
+
+    match /sweeperSessions/{sessionId} {
+      allow get: if isSignedIn() && isValidId(sessionId);
+      allow list: if isSignedIn() && resource.data.role == 'barredor';
+      allow create: if isSignedIn() &&
+        isValidId(sessionId) &&
+        isValidSweeperSession(incoming()) &&
+        (incoming().employeeId == request.auth.uid || isAdmin()) &&
+        incoming().startedAt == request.time &&
+        incoming().lastUpdatedAt == request.time;
+      allow update: if isSignedIn() &&
+        isValidId(sessionId) &&
+        isValidSweeperSession(incoming()) &&
+        (existing().employeeId == request.auth.uid || isAdmin()) &&
+        incoming().employeeId == existing().employeeId &&
+        incoming().startedAt == existing().startedAt &&
+        incoming().lastUpdatedAt == request.time &&
+        (
+          (existing().active == true && incoming().active == true && incoming().diff(existing()).affectedKeys().hasOnly(['points', 'distanceMeters', 'lastUpdatedAt'])) ||
+          (existing().active == true && incoming().active == false && incoming().endedAt == request.time && incoming().diff(existing()).affectedKeys().hasOnly(['active', 'endedAt', 'lastUpdatedAt'])) ||
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['employeeName', 'employeeColor', 'lastUpdatedAt']))
+        );
+      allow delete: if isAdmin() && isValidId(sessionId);
+    }
+
+    match /collectorSessions/{sessionId} {
+      allow get: if isSignedIn() && isValidId(sessionId);
+      allow list: if isSignedIn() && resource.data.role == 'recolector';
+      allow create: if isSignedIn() &&
+        isValidId(sessionId) &&
+        isValidCollectorSession(incoming()) &&
+        (incoming().employeeId == request.auth.uid || isAdmin()) &&
+        incoming().startedAt == request.time &&
+        incoming().lastUpdatedAt == request.time;
+      allow update: if isSignedIn() &&
+        isValidId(sessionId) &&
+        isValidCollectorSession(incoming()) &&
+        (existing().employeeId == request.auth.uid || isAdmin()) &&
+        incoming().employeeId == existing().employeeId &&
+        incoming().startedAt == existing().startedAt &&
+        incoming().lastUpdatedAt == request.time &&
+        (
+          incoming().diff(existing()).affectedKeys().hasOnly(['currentLat', 'currentLng', 'lastUpdatedAt', 'active']) ||
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['employeeName', 'employeeColor', 'lastUpdatedAt']))
+        );
+      allow delete: if isAdmin() && isValidId(sessionId);
+    }
+
+    match /containers/{containerId} {
+      allow get: if isSignedIn() && isValidId(containerId);
+      allow list: if isSignedIn() && resource.data.status in ['optimo', 'lleno', 'danado', 'desbordado'];
+      allow create: if isSignedIn() &&
+        isValidId(containerId) &&
+        isValidContainer(incoming()) &&
+        (incoming().employeeId == request.auth.uid || isAdmin()) &&
+        incoming().createdAt == request.time;
+      allow update: if isSignedIn() &&
+        isValidId(containerId) &&
+        isValidContainer(incoming()) &&
+        isAdmin() &&
+        incoming().employeeId == existing().employeeId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['employeeName', 'status', 'comment']);
+      allow delete: if isAdmin() && isValidId(containerId);
+    }
+  }
+}

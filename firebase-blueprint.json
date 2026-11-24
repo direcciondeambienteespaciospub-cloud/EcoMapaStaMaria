@@ -1,0 +1,336 @@
+{
+  "entities": {
+    "EmployeePublic": {
+      "title": "EmployeePublic",
+      "description": "Public operational identity of a municipal field worker used for collaborative map legends and sessions.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "firstName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 60
+        },
+        "lastName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "fullName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "color": {
+          "type": "string",
+          "minLength": 7,
+          "maxLength": 7,
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "firstName", "lastName", "fullName", "color", "createdAt"]
+    },
+    "EmployeePrivate": {
+      "title": "EmployeePrivate",
+      "description": "Isolated PII document for an employee containing DNI, phone, birthDate, and shift PIN.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dni": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 20
+        },
+        "phone": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 30
+        },
+        "birthDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "pin": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 32
+        }
+      },
+      "required": ["uid", "dni", "phone", "birthDate", "pin"]
+    },
+    "AdminGrant": {
+      "title": "AdminGrant",
+      "description": "Document granting administrative privileges to a specific Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 160
+        },
+        "grantedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["email", "grantedAt"]
+    },
+    "AdminProfile": {
+      "title": "AdminProfile",
+      "description": "Configuration and contact profile for the Oficina de Ambiente leadership.",
+      "type": "object",
+      "properties": {
+        "fullName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "roleTitle": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 160
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "masterKey": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 64
+        }
+      },
+      "required": ["fullName", "roleTitle", "phone", "email", "masterKey"]
+    },
+    "SweeperSession": {
+      "title": "SweeperSession",
+      "description": "Real-time street sweeping trajectory and shift presence state.",
+      "type": "object",
+      "properties": {
+        "employeeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "employeeName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "employeeColor": {
+          "type": "string",
+          "minLength": 7,
+          "maxLength": 7,
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["barredor"]
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastUpdatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "endedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "points": {
+          "type": "array"
+        },
+        "distanceMeters": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "employeeId",
+        "employeeName",
+        "employeeColor",
+        "role",
+        "active",
+        "startedAt",
+        "lastUpdatedAt",
+        "points",
+        "distanceMeters"
+      ]
+    },
+    "CollectorSession": {
+      "title": "CollectorSession",
+      "description": "Real-time collector location and shift presence tracking.",
+      "type": "object",
+      "properties": {
+        "employeeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "employeeName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "employeeColor": {
+          "type": "string",
+          "minLength": 7,
+          "maxLength": 7,
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["recolector"]
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastUpdatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "currentLat": {
+          "type": "number"
+        },
+        "currentLng": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "employeeId",
+        "employeeName",
+        "employeeColor",
+        "role",
+        "active",
+        "startedAt",
+        "lastUpdatedAt",
+        "currentLat",
+        "currentLng"
+      ]
+    },
+    "ContainerRecord": {
+      "title": "ContainerRecord",
+      "description": "Field report for a waste container in Santa María including status and optional compressed photo.",
+      "type": "object",
+      "properties": {
+        "employeeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "employeeName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "barrio": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "lat": {
+          "type": "number"
+        },
+        "lng": {
+          "type": "number"
+        },
+        "locationSource": {
+          "type": "string",
+          "enum": ["gps", "manual"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["optimo", "lleno", "danado", "desbordado"]
+        },
+        "comment": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "photoDataUrl": {
+          "type": "string",
+          "maxLength": 350000
+        }
+      },
+      "required": [
+        "employeeId",
+        "employeeName",
+        "createdAt",
+        "barrio",
+        "reference",
+        "locationSource",
+        "status",
+        "comment"
+      ]
+    }
+  },
+  "firestore": {
+    "/employees/{employeeId}": {
+      "schema": { "$ref": "#/entities/EmployeePublic" },
+      "description": "Public operational employee profiles (name and collaborative route color)."
+    },
+    "/employees/{employeeId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/EmployeePrivate" },
+      "description": "Isolated PII document (info) containing DNI, phone, birthDate, and shift PIN."
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminGrant" },
+      "description": "Admin role grant documents."
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/AdminProfile" },
+      "description": "Administrative profile and master key settings (adminProfile)."
+    },
+    "/sweeperSessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/SweeperSession" },
+      "description": "Live sweeping routes and timestamps."
+    },
+    "/collectorSessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/CollectorSession" },
+      "description": "Live collector coordinates and shift timestamps."
+    },
+    "/containers/{containerId}": {
+      "schema": { "$ref": "#/entities/ContainerRecord" },
+      "description": "Waste container status reports with coordinates and optional compressed photo."
+    }
+  }
+}
