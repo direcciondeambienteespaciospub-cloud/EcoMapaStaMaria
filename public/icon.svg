@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="112" fill="#1B5E20"/>
+  <!-- Valles Calchaquíes / Santa María mountains -->
+  <path d="M56 380 L166 232 L242 324 L318 208 L456 380 Z" fill="#2E7D32" opacity="0.85"/>
+  <path d="M56 380 L166 232 L212 288 L156 380 Z" fill="#81C784" opacity="0.35"/>
+  <!-- Location Pin -->
+  <path d="M256 88 C191.9 88 140 139.9 140 204 C140 291 256 418 256 418 C256 418 372 291 372 204 C372 139.9 320.1 88 256 88 Z" fill="#F1F8E9"/>
+  <!-- Ecological Leaf inside Pin -->
+  <path d="M256 138 C218 158 204 198 220 236 C234 268 278 272 302 246 C322 224 316 172 256 138 Z" fill="#1B5E20"/>
+  <path d="M256 154 C256 202 256 244 256 276" stroke="#F1F8E9" stroke-width="10" stroke-linecap="round"/>
+  <path d="M256 206 L282 184" stroke="#F1F8E9" stroke-width="8" stroke-linecap="round"/>
+  <path d="M256 230 L232 208" stroke="#F1F8E9" stroke-width="8" stroke-linecap="round"/>
+</svg>
