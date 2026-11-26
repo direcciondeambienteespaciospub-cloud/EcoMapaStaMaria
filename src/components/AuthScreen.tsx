@@ -4,6 +4,8 @@ import {
   ArrowLeft,
   ArrowRight,
   Calendar,
+  Eye,
+  EyeOff,
   KeyRound,
   Loader2,
   Lock,
@@ -55,6 +57,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
   // Saludo / Acceso rápido con PIN
   const [quickPin, setQuickPin] = useState('');
+  const [showQuickPin, setShowQuickPin] = useState(false);
   const [quickError, setQuickError] = useState('');
 
   // Registro completo (Nombre, Apellido, DNI/Legajo, Teléfono, Fecha de nacimiento, PIN)
@@ -64,12 +67,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [phone, setPhone] = useState('');
   const [birthDate, setBirthDate] = useState('');
   const [pin, setPin] = useState('');
+  const [showRegPin, setShowRegPin] = useState(false);
   const [registerError, setRegisterError] = useState('');
   const [registerBusy, setRegisterBusy] = useState(false);
 
   // Modal de Administración
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [adminError, setAdminError] = useState('');
   const [adminBusy, setAdminBusy] = useState(false);
 
@@ -220,7 +225,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       const isAuthorized = await checkIsAdminUser(user);
       if (!isAuthorized) {
         setAdminError(
-          `La cuenta conectada (${user.email ?? 'sin correo'}) no tiene permiso de Jefa de Área. Iniciá sesión con la cuenta administradora de la oficina o autorizá este ID desde Administración: ${user.uid}`,
+          `La cuenta conectada (${user.email ?? 'sin correo'}) no tiene permiso de Jefa de Área. Iniciá sesión con la cuenta administradora de la oficina.`,
         );
         return;
       }
@@ -271,6 +276,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               onClick={() => {
                 setAdminError('');
                 setAdminPassword('');
+                setShowAdminPassword(false);
                 setShowAdminModal(true);
               }}
               className="mt-3 flex min-h-[56px] w-full max-w-sm items-center justify-center gap-2.5 rounded-2xl border-2 border-[#1B5E20] bg-white px-6 py-4 text-base font-bold text-[#1B5E20] transition-colors hover:bg-[#F1F8E9] active:scale-[0.99] cursor-pointer"
@@ -415,15 +421,23 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
                   <input
                     id="quick-pin"
-                    type="password"
+                    type={showQuickPin ? 'text' : 'password'}
                     inputMode="numeric"
                     required
                     autoFocus
                     value={quickPin}
                     onChange={(e) => setQuickPin(e.target.value)}
                     placeholder="Ingresá tu PIN"
-                    className="min-h-[54px] w-full rounded-xl border border-slate-300 bg-white pl-11 pr-4 font-mono text-lg text-slate-900 placeholder:font-sans placeholder:text-sm placeholder:text-slate-400 focus:border-[#1B5E20] focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/20"
+                    className="min-h-[54px] w-full rounded-xl border border-slate-300 bg-white pl-11 pr-12 font-mono text-lg text-slate-900 placeholder:font-sans placeholder:text-sm placeholder:text-slate-400 focus:border-[#1B5E20] focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/20"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickPin((prev) => !prev)}
+                    aria-label={showQuickPin ? 'Ocultar PIN' : 'Ver PIN'}
+                    className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 cursor-pointer"
+                  >
+                    {showQuickPin ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
                 </div>
               </div>
 
@@ -600,15 +614,23 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   <KeyRound className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
                     id="reg-pin"
-                    type="password"
+                    type={showRegPin ? 'text' : 'password'}
                     inputMode="numeric"
                     required
                     minLength={4}
                     value={pin}
                     onChange={(e) => setPin(e.target.value)}
                     placeholder="Mínimo 4 dígitos"
-                    className="min-h-[50px] w-full rounded-xl border border-slate-300 bg-white pl-10 pr-4 font-mono text-base text-slate-900 placeholder:font-sans placeholder:text-slate-400 focus:border-[#1B5E20] focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/20"
+                    className="min-h-[50px] w-full rounded-xl border border-slate-300 bg-white pl-10 pr-12 font-mono text-base text-slate-900 placeholder:font-sans placeholder:text-slate-400 focus:border-[#1B5E20] focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/20"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowRegPin((prev) => !prev)}
+                    aria-label={showRegPin ? 'Ocultar PIN' : 'Ver PIN'}
+                    className="absolute right-1.5 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 cursor-pointer"
+                  >
+                    {showRegPin ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
                 </div>
               </div>
             </div>
@@ -671,18 +693,26 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 </div>
               )}
 
-              <div>
+              <div className="relative">
                 <input
                   id="admin-master-key"
                   aria-label="Ingresá la contraseña"
-                  type="password"
+                  type={showAdminPassword ? 'text' : 'password'}
                   autoFocus
                   required
                   value={adminPassword}
                   onChange={(e) => setAdminPassword(e.target.value)}
                   placeholder="Ingresá la contraseña"
-                  className="min-h-[50px] w-full rounded-xl border border-slate-300 bg-white px-4 font-mono text-base text-slate-900 placeholder:font-sans placeholder:text-slate-400 focus:border-[#1B5E20] focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/20"
+                  className="min-h-[50px] w-full rounded-xl border border-slate-300 bg-white pl-4 pr-12 font-mono text-base text-slate-900 placeholder:font-sans placeholder:text-slate-400 focus:border-[#1B5E20] focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/20"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowAdminPassword((prev) => !prev)}
+                  aria-label={showAdminPassword ? 'Ocultar contraseña' : 'Ver contraseña'}
+                  className="absolute right-1.5 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 cursor-pointer"
+                >
+                  {showAdminPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
               </div>
 
               <div className="flex items-center gap-3 pt-1">

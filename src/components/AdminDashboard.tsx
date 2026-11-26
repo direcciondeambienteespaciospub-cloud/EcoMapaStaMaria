@@ -23,6 +23,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {CONTAINER_STATUS_META, EMPLOYEE_COLORS, SANTA_MARIA_CENTER} from '../constants';
 import {
   escapeHtml,
+  exportCollectorsToCSV,
   exportContainersToCSV,
   exportEmployeesToCSV,
   exportSweepersToCSV,
@@ -33,7 +34,6 @@ import {
   groupContainersByLocation,
   isTodayAR,
 } from '../services/storage';
-import {grantAdminAccessInCloud} from '../services/firebaseDb';
 import type {
   AdminProfile,
   AppDatabase,
@@ -96,11 +96,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [empSavedMsg, setEmpSavedMsg] = useState('');
   const [empSaving, setEmpSaving] = useState(false);
   const [resettingDemo, setResettingDemo] = useState(false);
-  const [grantUid, setGrantUid] = useState('');
-  const [grantEmail, setGrantEmail] = useState('');
-  const [grantMsg, setGrantMsg] = useState('');
-  const [grantError, setGrantError] = useState('');
-  const [grantBusy, setGrantBusy] = useState(false);
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -631,13 +626,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             {/* Panel lateral de Control de Presentismo */}
             <aside className="rounded-3xl border border-emerald-950/10 bg-white p-5 shadow-xs lg:col-span-4">
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="font-display text-base font-bold text-slate-900">
-                  Control de Presentismo
-                </h2>
-                <span className="font-mono text-xs font-bold text-[#1B5E20] tabular-nums">
-                  {workerSummaries.filter((w) => w.active).length} activos
-                </span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="font-display text-base font-bold text-slate-900">
+                    Control de Presentismo
+                  </h2>
+                  <span className="font-mono text-xs font-bold text-[#1B5E20] tabular-nums">
+                    {workerSummaries.filter((w) => w.active).length} activos
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const sessionsToExport = onlyTodayOnMap
+                      ? db.collectorSessions.filter(
+                          (s) => isTodayAR(s.lastUpdatedAt) || isTodayAR(s.startedAt),
+                        )
+                      : db.collectorSessions;
+                    exportCollectorsToCSV(sessionsToExport, db.containers);
+                  }}
+                  className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl bg-[#1B5E20] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#2E7D32] cursor-pointer"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Exportar Recolectores (Excel)</span>
+                </button>
               </div>
               <p className="mt-1 text-xs text-slate-600">
                 Tocá un empleado para centrar su ubicación y revisar su estado de movimiento.
@@ -827,7 +839,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-[#1B5E20] px-4 py-2.5 text-sm font-bold text-white shadow-xs transition-colors hover:bg-[#2E7D32] whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   <Download className="h-4 w-4" />
-                  <span>Exportar a Excel / CSV</span>
+                  <span>Exportar Contenedores (Excel)</span>
                 </button>
               </div>
 
@@ -1266,70 +1278,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
                 </div>
               )}
-            </div>
-
-            {/* Autorizar cuenta Google de la Oficina como Administradora */}
-            <div className="mt-6 border-t border-slate-100 pt-5">
-              <h3 className="font-display text-sm font-bold text-slate-900">
-                Autorizar otra cuenta de Jefatura / Oficina
-              </h3>
-              <p className="mt-0.5 text-xs text-slate-600">
-                Si la Jefa ingresa con su propio Gmail desde la PC de la oficina, pegá acá el ID
-                de usuario que muestra la pantalla y su correo para darle acceso permanente.
-              </p>
-
-              {grantMsg && (
-                <p className="mt-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-950">
-                  {grantMsg}
-                </p>
-              )}
-              {grantError && (
-                <p className="mt-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-semibold text-red-900">
-                  {grantError}
-                </p>
-              )}
-
-              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <input
-                  type="text"
-                  value={grantUid}
-                  onChange={(e) => setGrantUid(e.target.value)}
-                  placeholder="ID de usuario (UID)"
-                  className="min-h-[42px] rounded-xl border border-slate-300 px-3 font-mono text-xs text-slate-900 focus:border-[#1B5E20] focus:outline-none"
-                />
-                <input
-                  type="email"
-                  value={grantEmail}
-                  onChange={(e) => setGrantEmail(e.target.value)}
-                  placeholder="Correo de la oficina (Gmail)"
-                  className="min-h-[42px] rounded-xl border border-slate-300 px-3 text-xs text-slate-900 focus:border-[#1B5E20] focus:outline-none"
-                />
-              </div>
-              <button
-                type="button"
-                disabled={grantBusy}
-                onClick={async () => {
-                  setGrantMsg('');
-                  setGrantError('');
-                  setGrantBusy(true);
-                  try {
-                    await grantAdminAccessInCloud(grantUid, grantEmail);
-                    setGrantMsg(`Acceso de Jefatura otorgado a ${grantEmail.trim()}.`);
-                    setGrantUid('');
-                    setGrantEmail('');
-                  } catch (err) {
-                    setGrantError(
-                      err instanceof Error ? err.message : 'Verificá el UID y el correo.',
-                    );
-                  } finally {
-                    setGrantBusy(false);
-                  }
-                }}
-                className="mt-2.5 inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-xl border border-[#1B5E20] bg-[#F1F8E9] px-4 py-2 text-xs font-bold text-[#1B5E20] hover:bg-emerald-100 disabled:opacity-60 cursor-pointer"
-              >
-                <Shield className="h-3.5 w-3.5" />
-                <span>{grantBusy ? 'Autorizando...' : 'Autorizar cuenta administrativa'}</span>
-              </button>
             </div>
           </section>
 

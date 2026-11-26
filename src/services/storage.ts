@@ -598,6 +598,49 @@ export function exportSweepersToCSV(sessions: SweeperSession[]): void {
   downloadCsvFile(`EcoMapa_SantaMaria_Barrido_${dateStamp}.csv`, headers, rows);
 }
 
+export function exportCollectorsToCSV(
+  sessions: CollectorSession[],
+  containers: ContainerRecord[] = [],
+): void {
+  const headers = [
+    'ID Jornada',
+    'Empleado',
+    'Inicio',
+    'Último Movimiento',
+    'Fin',
+    'Estado',
+    'Latitud Actual',
+    'Longitud Actual',
+    'Enlace Google Maps',
+    'Contenedores Cargados en el Día',
+  ];
+
+  const rows = sessions.map((s) => {
+    const sessionDay = getLocalDateKeyAR(s.startedAt);
+    const dayContainersCount = containers.filter(
+      (c) => c.employeeId === s.employeeId && getLocalDateKeyAR(c.createdAt) === sessionDay,
+    ).length;
+    const [lat, lng] = s.currentLocation;
+    const mapsUrl = `https://www.google.com/maps?q=${lat.toFixed(6)},${lng.toFixed(6)}`;
+
+    return [
+      s.id,
+      s.employeeName,
+      formatDateTimeAR(s.startedAt),
+      formatDateTimeAR(s.lastUpdatedAt),
+      s.endedAt ? formatDateTimeAR(s.endedAt) : s.active ? 'En curso' : 'Finalizado',
+      s.active ? 'En recorrido activo' : 'Finalizado',
+      lat.toFixed(6),
+      lng.toFixed(6),
+      mapsUrl,
+      String(dayContainersCount),
+    ];
+  });
+
+  const dateStamp = getLocalDateKeyAR(new Date().toISOString());
+  downloadCsvFile(`EcoMapa_SantaMaria_Recolectores_${dateStamp}.csv`, headers, rows);
+}
+
 export function exportEmployeesToCSV(employees: Employee[]): void {
   const headers = [
     'ID Usuario',
