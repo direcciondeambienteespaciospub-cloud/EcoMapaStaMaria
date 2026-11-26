@@ -20,7 +20,12 @@ import {
   X,
 } from 'lucide-react';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
-import {CONTAINER_STATUS_META, EMPLOYEE_COLORS, SANTA_MARIA_CENTER} from '../constants';
+import {BOOTSTRAP_ADMIN_EMAIL, CONTAINER_STATUS_META, EMPLOYEE_COLORS, SANTA_MARIA_CENTER} from '../constants';
+import {
+  authorizeAdminEmailInCloud,
+  fetchAuthorizedAdminEmails,
+  revokeAdminEmailInCloud,
+} from '../services/firebaseDb';
 import {
   escapeHtml,
   exportCollectorsToCSV,
@@ -96,6 +101,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [empSavedMsg, setEmpSavedMsg] = useState('');
   const [empSaving, setEmpSaving] = useState(false);
   const [resettingDemo, setResettingDemo] = useState(false);
+  const [authorizedEmails, setAuthorizedEmails] = useState<string[]>([]);
+  const [newAdminEmail, setNewAdminEmail] = useState('');
+  const [emailGrantMsg, setEmailGrantMsg] = useState('');
+  const [emailGrantError, setEmailGrantError] = useState('');
+  const [emailGrantBusy, setEmailGrantBusy] = useState(false);
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -122,6 +132,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   useEffect(() => {
     const id = window.setInterval(() => setNowTick(Date.now()), 30_000);
     return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    void fetchAuthorizedAdminEmails().then((emails) => setAuthorizedEmails(emails));
   }, []);
 
   const visibleSweeperSessions = useMemo(
@@ -1278,6 +1292,108 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Autorizar otros correos Gmail para Jefatura (sin UID) */}
+            <div className="mt-6 border-t border-slate-100 pt-5">
+              <h3 className="font-display text-sm font-bold text-slate-900">
+                Cuentas de Jefatura Autorizadas
+              </h3>
+              <p className="mt-0.5 text-xs text-slate-600">
+                Agregá el correo Gmail de otra persona de la oficina para que pueda ingresar al
+                Panel Administrativo usando la misma clave maestra.
+              </p>
+
+              <div className="mt-3 space-y-1.5">
+                <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-[#F1F8E9] px-3 py-2 text-xs">
+                  <span className="truncate font-medium text-slate-800">
+                    {BOOTSTRAP_ADMIN_EMAIL}
+                  </span>
+                  <span className="shrink-0 rounded-md bg-[#1B5E20] px-2 py-0.5 text-[10px] font-bold text-white">
+                    Principal
+                  </span>
+                </div>
+
+                {authorizedEmails.map((em) => (
+                  <div
+                    key={em}
+                    className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs"
+                  >
+                    <span className="truncate font-medium text-slate-800">{em}</span>
+                    <button
+                      type="button"
+                      disabled={emailGrantBusy}
+                      onClick={async () => {
+                        setEmailGrantMsg('');
+                        setEmailGrantError('');
+                        setEmailGrantBusy(true);
+                        try {
+                          const updated = await revokeAdminEmailInCloud(em);
+                          setAuthorizedEmails(updated);
+                          setEmailGrantMsg(`Se quitó el acceso a ${em}.`);
+                        } catch (err) {
+                          setEmailGrantError(
+                            err instanceof Error ? err.message : 'No se pudo quitar el correo.',
+                          );
+                        } finally {
+                          setEmailGrantBusy(false);
+                        }
+                      }}
+                      aria-label={`Quitar acceso a ${em}`}
+                      className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50 cursor-pointer"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      <span>Quitar</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {emailGrantMsg && (
+                <p className="mt-2.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-950">
+                  {emailGrantMsg}
+                </p>
+              )}
+              {emailGrantError && (
+                <p className="mt-2.5 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-semibold text-red-900">
+                  {emailGrantError}
+                </p>
+              )}
+
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="email"
+                  value={newAdminEmail}
+                  onChange={(e) => setNewAdminEmail(e.target.value)}
+                  placeholder="Correo Gmail a autorizar (ej: jefa@gmail.com)"
+                  className="min-h-[42px] flex-1 rounded-xl border border-slate-300 px-3 text-xs text-slate-900 focus:border-[#1B5E20] focus:outline-none"
+                />
+                <button
+                  type="button"
+                  disabled={emailGrantBusy}
+                  onClick={async () => {
+                    setEmailGrantMsg('');
+                    setEmailGrantError('');
+                    setEmailGrantBusy(true);
+                    try {
+                      const updated = await authorizeAdminEmailInCloud(newAdminEmail);
+                      setAuthorizedEmails(updated);
+                      setEmailGrantMsg(`Acceso otorgado a ${newAdminEmail.trim().toLowerCase()}.`);
+                      setNewAdminEmail('');
+                    } catch (err) {
+                      setEmailGrantError(
+                        err instanceof Error ? err.message : 'Verificá el correo ingresado.',
+                      );
+                    } finally {
+                      setEmailGrantBusy(false);
+                    }
+                  }}
+                  className="inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-xl border border-[#1B5E20] bg-[#F1F8E9] px-4 py-2 text-xs font-bold text-[#1B5E20] hover:bg-emerald-100 disabled:opacity-60 whitespace-nowrap cursor-pointer"
+                >
+                  <Shield className="h-3.5 w-3.5" />
+                  <span>{emailGrantBusy ? 'Guardando...' : 'Autorizar correo'}</span>
+                </button>
+              </div>
             </div>
           </section>
 

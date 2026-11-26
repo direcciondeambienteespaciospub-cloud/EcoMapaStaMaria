@@ -138,9 +138,29 @@ function fromFirestorePoints(raw: unknown): LatLngPoint[] {
 
 export async function checkIsAdminUser(user: User | null): Promise<boolean> {
   if (!user || !user.emailVerified) return false;
-  if (user.email?.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL) {
+  const userEmail = user.email?.toLowerCase().trim() ?? '';
+  if (userEmail === BOOTSTRAP_ADMIN_EMAIL) {
     return true;
   }
+
+  // Verificar primero por correo autorizado (sin necesitar UID)
+  if (userEmail) {
+    try {
+      const accessSnap = await getDoc(doc(db, 'settings', 'adminAccess'));
+      if (accessSnap.exists()) {
+        const raw = accessSnap.data()?.emails;
+        if (
+          Array.isArray(raw) &&
+          raw.some((item) => typeof item === 'string' && item.toLowerCase().trim() === userEmail)
+        ) {
+          return true;
+        }
+      }
+    } catch {
+      // Si el correo no está autorizado, Firestore devuelve permission-denied; seguimos al chequeo por UID
+    }
+  }
+
   const path = `admins/${user.uid}`;
   try {
     const snap = await getDoc(doc(db, 'admins', user.uid));
@@ -388,6 +408,65 @@ export async function fetchAllEmployeePrivateInfoForAdmin(
     }),
   );
   return result;
+}
+
+export async function fetchAuthorizedAdminEmails(): Promise<string[]> {
+  try {
+    const snap = await getDoc(doc(db, 'settings', 'adminAccess'));
+    if (!snap.exists()) return [];
+    const raw = snap.data()?.emails;
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((item): item is string => typeof item === 'string' && item.includes('@'))
+      .map((item) => item.toLowerCase().trim());
+  } catch {
+    return [];
+  }
+}
+
+export async function authorizeAdminEmailInCloud(email: string): Promise<string[]> {
+  const cleanEmail = email.toLowerCase().trim().slice(0, 160);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    throw new Error('Ingresá un correo Gmail válido (ej: nombre@gmail.com).');
+  }
+  if (cleanEmail === BOOTSTRAP_ADMIN_EMAIL) {
+    throw new Error('Ese correo ya es la cuenta administradora principal.');
+  }
+
+  const ref = doc(db, 'settings', 'adminAccess');
+  try {
+    const current = await fetchAuthorizedAdminEmails();
+    if (current.includes(cleanEmail)) {
+      throw new Error('Ese correo ya estaba autorizado.');
+    }
+    if (current.length >= 20) {
+      throw new Error('Se alcanzó el límite máximo de 20 correos autorizados.');
+    }
+    const nextEmails = [...current, cleanEmail];
+    await setDoc(ref, {emails: nextEmails});
+    return nextEmails;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.toLowerCase().includes('permission') || msg.toLowerCase().includes('missing or insufficient')) {
+      throw new Error(
+        'Para autorizar otros correos, primero copiá y publicá las Reglas nuevas en Firebase (Firestore → Reglas → Publicar).',
+      );
+    }
+    throw error instanceof Error ? error : new Error('No se pudo autorizar el correo.');
+  }
+}
+
+export async function revokeAdminEmailInCloud(emailToRemove: string): Promise<string[]> {
+  const target = emailToRemove.toLowerCase().trim();
+  const ref = doc(db, 'settings', 'adminAccess');
+  const current = await fetchAuthorizedAdminEmails();
+  const nextEmails = current.filter((item) => item !== target);
+  try {
+    await setDoc(ref, {emails: nextEmails});
+    return nextEmails;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'settings/adminAccess');
+  }
 }
 
 export async function grantAdminAccessInCloud(uid: string, email: string): Promise<void> {
