@@ -18,7 +18,11 @@ interface SweeperModeProps {
   sweeperSessions: SweeperSession[];
   containers: ContainerRecord[];
   onStartSession: (initialPoint: LatLngPoint) => Promise<SweeperSession>;
-  onAppendPoint: (sessionId: string, point: LatLngPoint) => Promise<void>;
+  onAppendPoint: (
+    sessionId: string,
+    point: LatLngPoint,
+    accuracyMeters?: number,
+  ) => Promise<void>;
   onFinishSession: (sessionId: string) => Promise<void>;
 }
 
@@ -177,7 +181,11 @@ export const SweeperMode: React.FC<SweeperModeProps> = ({
       const marker = L.marker(lastPt, {icon: markerIcon});
       marker.bindTooltip(
         `${session.employeeName}${isMine ? ' (Vos)' : ''} · ${session.distanceMeters} m`,
-        {direction: 'top', offset: [0, -10]},
+        {
+          permanent: session.active,
+          direction: 'top',
+          offset: [0, -10],
+        },
       );
       marker.addTo(group);
     }
@@ -250,8 +258,10 @@ export const SweeperMode: React.FC<SweeperModeProps> = ({
     return releaseLock;
   }, [activeSession]);
 
+  const activeSessionId = activeSession?.id ?? null;
+
   useEffect(() => {
-    if (!activeSession) {
+    if (!activeSessionId) {
       if (watchIdRef.current !== null && 'geolocation' in navigator) {
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;
@@ -274,8 +284,8 @@ export const SweeperMode: React.FC<SweeperModeProps> = ({
         const pt: LatLngPoint = [pos.coords.latitude, pos.coords.longitude];
         setLiveGpsPoint(pt);
 
-        // Filtrar saltos de antena celular muy imprecisos (> 65 m) para no deformar la calle
-        if (accuracy > 65 && activeSession.points.length >= 1) {
+        // Filtrar lecturas imprecisas (> 50 m) para evitar saltos entre cuadras o al ir en vehículo
+        if (accuracy > 50) {
           setGpsStatus('tracking');
           setGpsMessage(`Esperando mejor señal GPS (precisión actual ±${accuracy} m)...`);
           return;
@@ -283,7 +293,7 @@ export const SweeperMode: React.FC<SweeperModeProps> = ({
 
         setGpsStatus('tracking');
         setGpsMessage(`GPS en vivo conectado (precisión ±${accuracy || 10} m)`);
-        void onAppendPoint(activeSession.id, pt);
+        void onAppendPoint(activeSessionId, pt, accuracy);
         mapRef.current?.panTo(pt, {animate: true});
       },
       () => {
@@ -294,7 +304,7 @@ export const SweeperMode: React.FC<SweeperModeProps> = ({
       },
       {
         enableHighAccuracy: true,
-        maximumAge: 3000,
+        maximumAge: 2500,
         timeout: 12000,
       },
     );
@@ -305,7 +315,7 @@ export const SweeperMode: React.FC<SweeperModeProps> = ({
         watchIdRef.current = null;
       }
     };
-  }, [activeSession?.id, activeSession?.points.length, onAppendPoint]);
+  }, [activeSessionId, onAppendPoint]);
 
   const handleStartSweeping = async () => {
     if (startingSession) return;

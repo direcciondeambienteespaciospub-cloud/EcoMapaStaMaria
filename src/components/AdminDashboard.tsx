@@ -22,10 +22,16 @@ import {
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {CONTAINER_STATUS_META, EMPLOYEE_COLORS, SANTA_MARIA_CENTER} from '../constants';
 import {
+  escapeHtml,
   exportContainersToCSV,
+  exportEmployeesToCSV,
+  exportSweepersToCSV,
   formatDateTimeAR,
   formatTimeAR,
+  getLocalDateKeyAR,
   getPresenceState,
+  groupContainersByLocation,
+  isTodayAR,
 } from '../services/storage';
 import {grantAdminAccessInCloud} from '../services/firebaseDb';
 import type {
@@ -69,6 +75,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // 3 pestañas principales solicitadas: Recorridos en Tiempo Real, Barrido y Perfil
   const [activeTab, setActiveTab] = useState<'recorridos' | 'barrido' | 'perfil'>('recorridos');
   const [showContainersOnMap, setShowContainersOnMap] = useState<boolean>(true);
+  const [onlyTodayOnMap, setOnlyTodayOnMap] = useState<boolean>(true);
+  const [sweepDateFilter, setSweepDateFilter] = useState<string>('');
   const [confirmReset, setConfirmReset] = useState<boolean>(false);
   const [nowTick, setNowTick] = useState<number>(Date.now());
   const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
@@ -121,10 +129,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return () => window.clearInterval(id);
   }, []);
 
+  const visibleSweeperSessions = useMemo(
+    () =>
+      onlyTodayOnMap
+        ? db.sweeperSessions.filter((s) => isTodayAR(s.startedAt))
+        : db.sweeperSessions,
+    [db.sweeperSessions, onlyTodayOnMap],
+  );
+
+  const visibleCollectorSessions = useMemo(
+    () =>
+      onlyTodayOnMap
+        ? db.collectorSessions.filter((c) => isTodayAR(c.lastUpdatedAt))
+        : db.collectorSessions,
+    [db.collectorSessions, onlyTodayOnMap],
+  );
+
+  const permanentContainerGroups = useMemo(
+    () => groupContainersByLocation(db.containers),
+    [db.containers],
+  );
+
+  const filteredSweeperSessions = useMemo(() => {
+    if (!sweepDateFilter) return visibleSweeperSessions;
+    return db.sweeperSessions.filter((s) => getLocalDateKeyAR(s.startedAt) === sweepDateFilter);
+  }, [db.sweeperSessions, visibleSweeperSessions, sweepDateFilter]);
+
   const workerSummaries = useMemo<WorkerSummary[]>(() => {
     const latestByEmployee = new Map<string, WorkerSummary>();
 
-    for (const s of db.sweeperSessions) {
+    for (const s of visibleSweeperSessions) {
       const pt = s.points.length > 0 ? s.points[s.points.length - 1] : SANTA_MARIA_CENTER;
       const pres = getPresenceState(s.active, s.lastUpdatedAt, nowTick);
       const existing = latestByEmployee.get(s.employeeId);
@@ -150,7 +184,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
     }
 
-    for (const c of db.collectorSessions) {
+    for (const c of visibleCollectorSessions) {
       const pres = getPresenceState(c.active, c.lastUpdatedAt, nowTick);
       const existing = latestByEmployee.get(c.employeeId);
       if (
@@ -183,7 +217,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return Array.from(latestByEmployee.values()).sort(
       (a, b) => weight[a.presence] - weight[b.presence],
     );
-  }, [db.sweeperSessions, db.collectorSessions, nowTick]);
+  }, [visibleSweeperSessions, visibleCollectorSessions, nowTick]);
 
   // Mapa pestaña 1: Recorridos en Tiempo Real
   useEffect(() => {
@@ -225,7 +259,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const group = layerGroupRef.current;
     group.clearLayers();
 
-    for (const s of db.sweeperSessions) {
+    for (const s of visibleSweeperSessions) {
       if (s.points.length < 2) continue;
       L.polyline(s.points, {
         color: s.employeeColor,
@@ -257,6 +291,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       });
 
       L.marker(w.location, {icon})
+        .bindTooltip(w.employeeName, {permanent: w.active, direction: 'top', offset: [0, -16]})
         .bindPopup(
           `<div style="font-family:sans-serif;min-width:185px">
             <strong style="font-size:13px">${w.employeeName}</strong><br/>
@@ -270,29 +305,48 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
 
     if (showContainersOnMap) {
-      for (const c of db.containers) {
-        if (c.lat === null || c.lng === null) continue;
-        const meta = CONTAINER_STATUS_META[c.status];
+      for (const item of permanentContainerGroups) {
+        const latestMeta = CONTAINER_STATUS_META[item.latest.status];
+        const dotColor = item.hasTodayReport ? latestMeta.hex : '#94A3B8';
         const icon = L.divIcon({
           className: 'admin-container-pin',
-          html: `<div style="width:16px;height:16px;border-radius:4px;background:${meta.hex};border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,0.4);"></div>`,
-          iconSize: [16, 16],
-          iconAnchor: [8, 8],
+          html: `<div style="position:relative;width:22px;height:22px;border-radius:6px;background:#0284C7;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:10px;font-family:sans-serif;">C<span style="position:absolute;right:-3px;bottom:-3px;width:9px;height:9px;border-radius:9999px;background:${dotColor};border:2px solid #fff;"></span></div>`,
+          iconSize: [22, 22],
+          iconAnchor: [11, 11],
         });
 
-        L.marker([c.lat, c.lng], {icon})
+        const historyHtml = item.history
+          .slice(0, 15)
+          .map((h) => {
+            const meta = CONTAINER_STATUS_META[h.status];
+            const photoHtml = h.photoDataUrl
+              ? `<img src="${h.photoDataUrl}" alt="Foto" style="margin-top:4px;width:100%;max-height:85px;object-fit:cover;border-radius:6px;" />`
+              : '';
+            return `<div style="padding:6px 0;border-top:1px solid #e2e8f0;">
+              <div style="display:flex;justify-content:space-between;gap:6px;align-items:center;">
+                <span style="color:${meta.hex};font-weight:700;font-size:11px;">${escapeHtml(meta.shortLabel)}</span>
+                <span style="font-size:10px;color:#64748b;">${escapeHtml(formatDateTimeAR(h.createdAt))}</span>
+              </div>
+              <div style="font-size:11px;color:#334155;">${escapeHtml(h.employeeName)}</div>
+              <div style="font-size:11px;color:#475569;">${escapeHtml(h.comment)}</div>
+              ${photoHtml}
+            </div>`;
+          })
+          .join('');
+
+        L.marker([item.lat, item.lng], {icon})
           .bindPopup(
-            `<div style="font-family:sans-serif;min-width:170px">
-              <strong>Contenedor · ${c.barrio}</strong><br/>
-              <span>${c.reference}</span><br/>
-              <span style="color:${meta.hex};font-weight:700">${meta.label}</span><br/>
-              <span style="font-size:11px;color:#475569">${c.employeeName} · ${formatTimeAR(c.createdAt)}</span>
+            `<div style="font-family:sans-serif;min-width:210px;max-width:255px;">
+              <div style="font-size:11px;font-weight:800;color:#0284C7;">CONTENEDOR FIJO · ${escapeHtml(item.barrio)}</div>
+              <div style="font-size:12px;font-weight:700;color:#0f172a;margin-top:2px;">${escapeHtml(item.reference)}</div>
+              <div style="font-size:11px;color:#475569;margin-top:2px;">${item.history.length} reporte(s) diarios · ${item.hasTodayReport ? 'Actualizado hoy' : 'Pendiente hoy'}</div>
+              <div style="margin-top:6px;max-height:190px;overflow-y:auto;">${historyHtml}</div>
             </div>`,
           )
           .addTo(group);
       }
     }
-  }, [activeTab, db.sweeperSessions, db.containers, workerSummaries, showContainersOnMap]);
+  }, [activeTab, visibleSweeperSessions, permanentContainerGroups, workerSummaries, showContainersOnMap]);
 
   // Mapa pestaña 2: Barrido en Tiempo Real
   useEffect(() => {
@@ -334,7 +388,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const group = sweepLayerGroupRef.current;
     group.clearLayers();
 
-    for (const s of db.sweeperSessions) {
+    for (const s of filteredSweeperSessions) {
       if (s.points.length === 0) continue;
       if (s.points.length >= 2) {
         L.polyline(s.points, {
@@ -356,10 +410,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         fillColor: s.employeeColor,
         fillOpacity: 1,
       })
-        .bindTooltip(`${s.employeeName} (${s.distanceMeters} m)`)
+        .bindTooltip(`${s.employeeName} (${s.distanceMeters} m)`, {
+          permanent: s.active,
+          direction: 'top',
+          offset: [0, -8],
+        })
         .addTo(group);
     }
-  }, [activeTab, db.sweeperSessions]);
+  }, [activeTab, filteredSweeperSessions]);
 
   const handleJumpToContainers = () => {
     if (activeTab !== 'recorridos') {
@@ -378,7 +436,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (statusFilter !== 'all' && c.status !== statusFilter) return false;
       if (employeeFilter !== 'all' && c.employeeId !== employeeFilter) return false;
       if (dateFilter) {
-        const recordDate = new Date(c.createdAt).toISOString().slice(0, 10);
+        const recordDate = getLocalDateKeyAR(c.createdAt);
         if (recordDate !== dateFilter) return false;
       }
       if (q) {
@@ -513,6 +571,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <label className="inline-flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer">
                       <input
                         type="checkbox"
+                        checked={onlyTodayOnMap}
+                        onChange={(e) => setOnlyTodayOnMap(e.target.checked)}
+                        className="h-4 w-4 accent-[#1B5E20]"
+                      />
+                      <span>Solo hoy</span>
+                    </label>
+                    <label className="inline-flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer">
+                      <input
+                        type="checkbox"
                         checked={showContainersOnMap}
                         onChange={(e) => setShowContainersOnMap(e.target.checked)}
                         className="h-4 w-4 accent-[#1B5E20]"
@@ -525,12 +592,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         if (!mapRef.current) return;
                         const pts: LatLngPoint[] = [];
                         for (const w of workerSummaries) pts.push(w.location);
-                        for (const s of db.sweeperSessions) {
+                        for (const s of visibleSweeperSessions) {
                           for (const p of s.points) pts.push(p);
                         }
                         if (showContainersOnMap) {
-                          for (const c of db.containers) {
-                            if (c.lat !== null && c.lng !== null) pts.push([c.lat, c.lng]);
+                          for (const c of permanentContainerGroups) {
+                            pts.push([c.lat, c.lng]);
                           }
                         }
                         if (pts.length >= 2) {
@@ -957,20 +1024,61 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </section>
 
           <aside className="rounded-3xl border border-emerald-950/10 bg-white p-5 shadow-xs lg:col-span-5">
-            <h2 className="font-display text-base font-bold text-slate-900">
-              Detalle de Barrido por Empleado
-            </h2>
-            <p className="mt-1 text-xs text-slate-600">
-              Tocá un recorrido para centrar el mapa sobre la última calle pintada.
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="font-display text-base font-bold text-slate-900">
+                  Detalle de Barrido por Empleado
+                </h2>
+                <p className="mt-1 text-xs text-slate-600">
+                  Tocá un recorrido para centrar el mapa o filtrá por fecha para descargar el informe.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => exportSweepersToCSV(filteredSweeperSessions)}
+                className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl bg-[#1B5E20] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#2E7D32] cursor-pointer"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>Exportar Barrido (Excel)</span>
+              </button>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <input
+                type="date"
+                aria-label="Filtrar barrido por fecha"
+                value={sweepDateFilter}
+                onChange={(e) => setSweepDateFilter(e.target.value)}
+                className="min-h-[38px] rounded-xl border border-slate-300 bg-white px-3 font-mono text-xs text-slate-900 focus:border-[#1B5E20] focus:outline-none"
+              />
+              {sweepDateFilter ? (
+                <button
+                  type="button"
+                  onClick={() => setSweepDateFilter('')}
+                  className="text-xs font-semibold text-[#1B5E20] hover:underline cursor-pointer"
+                >
+                  Volver a vista diaria
+                </button>
+              ) : (
+                <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={onlyTodayOnMap}
+                    onChange={(e) => setOnlyTodayOnMap(e.target.checked)}
+                    className="h-4 w-4 accent-[#1B5E20]"
+                  />
+                  <span>Solo hoy en mapa</span>
+                </label>
+              )}
+            </div>
 
             <div className="mt-4 divide-y divide-slate-100">
-              {db.sweeperSessions.length === 0 ? (
+              {filteredSweeperSessions.length === 0 ? (
                 <p className="py-8 text-center text-sm text-slate-500">
-                  No hay jornadas de barrido registradas.
+                  No hay jornadas de barrido registradas para este filtro.
                 </p>
               ) : (
-                db.sweeperSessions.map((s) => {
+                filteredSweeperSessions.map((s) => {
                   const pres = getPresenceState(s.active, s.lastUpdatedAt, nowTick);
                   const lastPt =
                     s.points.length > 0 ? s.points[s.points.length - 1] : SANTA_MARIA_CENTER;
@@ -992,7 +1100,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             {s.employeeName}
                           </p>
                           <p className="font-mono text-xs text-slate-600 tabular-nums">
-                            Inicio {formatTimeAR(s.startedAt)} · Últ. {formatTimeAR(s.lastUpdatedAt)}
+                            {formatDateTimeAR(s.startedAt)} · Últ. {formatTimeAR(s.lastUpdatedAt)}
                           </p>
                           <p className="mt-0.5 text-xs font-semibold text-slate-700">
                             {pres.label}
@@ -1092,7 +1200,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700">
-                  Clave Maestra de Administración (por defecto: ADMIN2026)
+                  Clave Maestra de Administración
                 </label>
                 <input
                   type="text"
@@ -1227,18 +1335,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           {/* Edición de empleados registrados */}
           <section className="rounded-3xl border border-emerald-950/10 bg-white p-6 shadow-xs lg:col-span-6">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#F1F8E9] text-[#1B5E20]">
-                <UserCog className="h-6 w-6" />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#F1F8E9] text-[#1B5E20]">
+                  <UserCog className="h-6 w-6" />
+                </div>
+                <div>
+                  <h2 className="font-display text-lg font-bold text-slate-900">
+                    Personal Registrado ({db.employees.length})
+                  </h2>
+                  <p className="text-xs text-slate-600">
+                    Seleccioná un empleado para actualizar sus datos, color asignado o PIN.
+                  </p>
+                </div>
               </div>
-              <div>
-                <h2 className="font-display text-lg font-bold text-slate-900">
-                  Personal Registrado
-                </h2>
-                <p className="text-xs text-slate-600">
-                  Seleccioná un empleado para actualizar sus datos, color asignado o PIN.
-                </p>
-              </div>
+              <button
+                type="button"
+                disabled={db.employees.length === 0}
+                onClick={() => exportEmployeesToCSV(db.employees)}
+                className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl bg-[#1B5E20] px-3.5 py-2 text-xs font-bold text-white hover:bg-[#2E7D32] disabled:opacity-50 cursor-pointer"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>Exportar Personal (Excel)</span>
+              </button>
             </div>
 
             <div className="mt-4">
@@ -1385,6 +1504,80 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 Todavía no hay empleados registrados en la nube.
               </p>
             )}
+          </section>
+
+          {/* Nómina completa de personal registrado en la nube */}
+          <section className="rounded-3xl border border-emerald-950/10 bg-white p-6 shadow-xs lg:col-span-12">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="font-display text-lg font-bold text-slate-900">
+                  Base de Datos del Personal Registrado
+                </h2>
+                <p className="text-xs text-slate-600">
+                  Todos los empleados que completaron su alta en EcoMapa quedan guardados de forma
+                  permanente en Firebase.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={db.employees.length === 0}
+                onClick={() => exportEmployeesToCSV(db.employees)}
+                className="inline-flex min-h-[42px] items-center gap-2 rounded-xl bg-[#1B5E20] px-4 py-2 text-xs font-bold text-white hover:bg-[#2E7D32] disabled:opacity-50 cursor-pointer"
+              >
+                <Download className="h-4 w-4" />
+                <span>Descargar Nómina en Excel / CSV</span>
+              </button>
+            </div>
+
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-xs font-bold text-slate-600">
+                    <th className="py-2.5 pr-4">Color</th>
+                    <th className="py-2.5 pr-4">Nombre y Apellido</th>
+                    <th className="py-2.5 pr-4">DNI / Legajo</th>
+                    <th className="py-2.5 pr-4">Teléfono</th>
+                    <th className="py-2.5 pr-4">Nacimiento</th>
+                    <th className="py-2.5">Fecha de Alta</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {db.employees.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-slate-500">
+                        Aún no hay personal registrado en la base de datos.
+                      </td>
+                    </tr>
+                  ) : (
+                    db.employees.map((emp) => (
+                      <tr key={emp.id} className="hover:bg-[#F1F8E9]/45">
+                        <td className="py-3 pr-4">
+                          <span
+                            className="inline-block h-4 w-4 rounded-full border border-black/15"
+                            style={{backgroundColor: emp.color}}
+                          />
+                        </td>
+                        <td className="py-3 pr-4 font-bold text-slate-900 whitespace-nowrap">
+                          {emp.fullName}
+                        </td>
+                        <td className="py-3 pr-4 font-mono text-xs text-slate-700 tabular-nums">
+                          {emp.dni || '—'}
+                        </td>
+                        <td className="py-3 pr-4 font-mono text-xs text-slate-700 tabular-nums">
+                          {emp.phone || '—'}
+                        </td>
+                        <td className="py-3 pr-4 font-mono text-xs text-slate-700 tabular-nums">
+                          {emp.birthDate || '—'}
+                        </td>
+                        <td className="py-3 font-mono text-xs text-slate-600 tabular-nums whitespace-nowrap">
+                          {formatDateTimeAR(emp.createdAt)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </section>
         </div>
       )}

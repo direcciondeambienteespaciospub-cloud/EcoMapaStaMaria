@@ -78,10 +78,12 @@ export default function App() {
   );
   const [view, setView] = useState<AppView>('auth');
 
-  // Refs to avoid stale closures in GPS watchers
+  // Refs to avoid stale closures and out-of-order writes in GPS watchers
   const sweeperSessionsRef = useRef<SweeperSession[]>([]);
   const collectorSessionsRef = useRef<CollectorSession[]>([]);
   const pendingPointsRef = useRef<Record<string, LatLngPoint[]>>({});
+  const lastPointTimeRef = useRef<Record<string, number>>({});
+  const sweeperWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const lastCollectorWriteRef = useRef<{lat: number; lng: number; at: number} | null>(null);
 
   sweeperSessionsRef.current = sweeperSessions;
@@ -326,33 +328,62 @@ export default function App() {
         sweeperSessionsRef.current,
       );
       pendingPointsRef.current[created.id] = created.points;
+      lastPointTimeRef.current[created.id] = Date.now();
       return created;
     },
     [currentEmployee],
   );
 
   const handleAppendSweeperPoint = useCallback(
-    async (sessionId: string, point: LatLngPoint): Promise<void> => {
-      const session = sweeperSessionsRef.current.find((s) => s.id === sessionId);
-      if (!session || !session.active) return;
+    async (sessionId: string, point: LatLngPoint, accuracyMeters?: number): Promise<void> => {
+      sweeperWriteQueueRef.current = sweeperWriteQueueRef.current
+        .then(async () => {
+          const session = sweeperSessionsRef.current.find((s) => s.id === sessionId);
+          if (!session || !session.active) return;
 
-      const latestPoints = pendingPointsRef.current[sessionId] ?? session.points;
-      const last = latestPoints[latestPoints.length - 1];
-      if (last && haversineDistanceMeters(last, point) < 6) {
-        return;
-      }
+          const latestPoints = pendingPointsRef.current[sessionId] ?? session.points;
+          const last = latestPoints[latestPoints.length - 1];
+          const now = Date.now();
 
-      const nextPoints = await appendSweeperPointInCloud(
-        {...session, points: latestPoints},
-        point,
-      );
-      pendingPointsRef.current[sessionId] = nextPoints;
+          if (last) {
+            const dist = haversineDistanceMeters(last, point);
+            const minStepMeters =
+              typeof accuracyMeters === 'number' && accuracyMeters > 22 ? 14 : 9;
+            if (dist < minStepMeters) {
+              return;
+            }
+            // Reject impossible GPS teleport spikes (> 35 m/s = 126 km/h over > 45 m)
+            const prevTime =
+              lastPointTimeRef.current[sessionId] ??
+              new Date(session.lastUpdatedAt).getTime();
+            const dtSec = Math.max(1, (now - prevTime) / 1000);
+            if (dist > 45 && dist / dtSec > 35) {
+              return;
+            }
+          }
+
+          const updatedPoints = [...latestPoints, point];
+          pendingPointsRef.current[sessionId] = updatedPoints;
+          lastPointTimeRef.current[sessionId] = now;
+
+          const nextPoints = await appendSweeperPointInCloud(
+            {...session, points: latestPoints},
+            point,
+          );
+          pendingPointsRef.current[sessionId] = nextPoints;
+        })
+        .catch((err) => {
+          console.error('Error al actualizar punto GPS:', err);
+        });
+
+      return sweeperWriteQueueRef.current;
     },
     [],
   );
 
   const handleFinishSweeping = useCallback(async (sessionId: string): Promise<void> => {
     delete pendingPointsRef.current[sessionId];
+    delete lastPointTimeRef.current[sessionId];
     await finishSweeperSessionInCloud(sessionId);
   }, []);
 

@@ -3,6 +3,7 @@ import type {
   AdminProfile,
   AppDatabase,
   CollectorSession,
+  ContainerGroup,
   ContainerRecord,
   Employee,
   LatLngPoint,
@@ -424,6 +425,14 @@ export function formatTimeAR(iso: string): string {
   });
 }
 
+export function getLocalDateKeyAR(iso: string): string {
+  const d = new Date(iso);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export function isTodayAR(iso: string): boolean {
   const d = new Date(iso);
   const now = new Date();
@@ -432,6 +441,86 @@ export function isTodayAR(iso: string): boolean {
     d.getMonth() === now.getMonth() &&
     d.getDate() === now.getDate()
   );
+}
+
+export function groupContainersByLocation(
+  records: ContainerRecord[],
+  radiusMeters: number = 25,
+): ContainerGroup[] {
+  // Anchor each permanent container using the earliest record's coordinates so pins never drift
+  const chronological = [...records]
+    .filter((r) => r.lat !== null && r.lng !== null)
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+  const groups: ContainerGroup[] = [];
+
+  for (const r of chronological) {
+    const lat = r.lat as number;
+    const lng = r.lng as number;
+    const match = groups.find(
+      (g) => haversineDistanceMeters([g.lat, g.lng], [lat, lng]) <= radiusMeters,
+    );
+    if (match) {
+      match.history.push(r);
+    } else {
+      groups.push({
+        key: r.id,
+        lat,
+        lng,
+        barrio: r.barrio,
+        reference: r.reference,
+        latest: r,
+        history: [r],
+        hasTodayReport: false,
+      });
+    }
+  }
+
+  // Sort each container's daily history newest first and refresh latest metadata
+  for (const g of groups) {
+    g.history.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+    g.latest = g.history[0];
+    g.barrio = g.latest.barrio;
+    g.reference = g.latest.reference;
+    g.hasTodayReport = g.history.some((item) => isTodayAR(item.createdAt));
+  }
+
+  return groups.sort(
+    (a, b) => new Date(b.latest.createdAt).getTime() - new Date(a.latest.createdAt).getTime(),
+  );
+}
+
+function escapeCsvCell(value: string): string {
+  const clean = value.replace(/"/g, '""').replace(/\r?\n/g, ' ');
+  return `"${clean}"`;
+}
+
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function downloadCsvFile(filename: string, headers: string[], rows: string[][]): void {
+  const csvContent =
+    '\uFEFF' +
+    [headers.map(escapeCsvCell).join(';'), ...rows.map((r) => r.map(escapeCsvCell).join(';'))].join(
+      '\n',
+    );
+  const blob = new Blob([csvContent], {type: 'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 export function exportContainersToCSV(records: ContainerRecord[]): void {
@@ -457,41 +546,83 @@ export function exportContainersToCSV(records: ContainerRecord[]): void {
     desbordado: 'Desbordado / Basura alrededor',
   };
 
-  const escapeCsv = (value: string) => {
-    const clean = value.replace(/"/g, '""').replace(/\r?\n/g, ' ');
-    return `"${clean}"`;
-  };
-
   const rows = records.map((r) => {
     const mapsUrl =
       r.lat !== null && r.lng !== null
         ? `https://www.google.com/maps?q=${r.lat.toFixed(6)},${r.lng.toFixed(6)}`
         : 'Sin coordenadas GPS';
     return [
-      escapeCsv(r.id),
-      escapeCsv(formatDateTimeAR(r.createdAt)),
-      escapeCsv(r.employeeName),
-      escapeCsv(r.barrio),
-      escapeCsv(r.reference),
-      escapeCsv(r.locationSource === 'gps' ? 'GPS' : 'Manual'),
-      escapeCsv(r.lat !== null ? r.lat.toFixed(6) : ''),
-      escapeCsv(r.lng !== null ? r.lng.toFixed(6) : ''),
-      escapeCsv(mapsUrl),
-      escapeCsv(statusLabels[r.status]),
-      escapeCsv(r.photoDataUrl ? 'Sí' : 'No'),
-      escapeCsv(r.comment),
-    ].join(';');
+      r.id,
+      formatDateTimeAR(r.createdAt),
+      r.employeeName,
+      r.barrio,
+      r.reference,
+      r.locationSource === 'gps' ? 'GPS' : 'Manual',
+      r.lat !== null ? r.lat.toFixed(6) : '',
+      r.lng !== null ? r.lng.toFixed(6) : '',
+      mapsUrl,
+      statusLabels[r.status],
+      r.photoDataUrl ? 'Sí' : 'No',
+      r.comment,
+    ];
   });
 
-  const csvContent = '\uFEFF' + [headers.map(escapeCsv).join(';'), ...rows].join('\n');
-  const blob = new Blob([csvContent], {type: 'text/csv;charset=utf-8;'});
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  const dateStamp = new Date().toISOString().slice(0, 10);
-  link.href = url;
-  link.download = `EcoMapa_SantaMaria_Contenedores_${dateStamp}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  const dateStamp = getLocalDateKeyAR(new Date().toISOString());
+  downloadCsvFile(`EcoMapa_SantaMaria_Contenedores_${dateStamp}.csv`, headers, rows);
+}
+
+export function exportSweepersToCSV(sessions: SweeperSession[]): void {
+  const headers = [
+    'ID Jornada',
+    'Empleado',
+    'Inicio',
+    'Último Movimiento',
+    'Fin',
+    'Estado',
+    'Metros Recorridos',
+    'Puntos GPS',
+  ];
+
+  const rows = sessions.map((s) => [
+    s.id,
+    s.employeeName,
+    formatDateTimeAR(s.startedAt),
+    formatDateTimeAR(s.lastUpdatedAt),
+    s.endedAt ? formatDateTimeAR(s.endedAt) : 'En curso',
+    s.active ? 'En recorrido activo' : 'Finalizado',
+    String(s.distanceMeters),
+    String(s.points.length),
+  ]);
+
+  const dateStamp = getLocalDateKeyAR(new Date().toISOString());
+  downloadCsvFile(`EcoMapa_SantaMaria_Barrido_${dateStamp}.csv`, headers, rows);
+}
+
+export function exportEmployeesToCSV(employees: Employee[]): void {
+  const headers = [
+    'ID Usuario',
+    'Nombre',
+    'Apellido',
+    'Nombre Completo',
+    'DNI / Legajo',
+    'Teléfono',
+    'Fecha de Nacimiento',
+    'Color Asignado',
+    'Fecha de Registro',
+  ];
+
+  const rows = employees.map((e) => [
+    e.id,
+    e.firstName,
+    e.lastName,
+    e.fullName,
+    e.dni,
+    e.phone,
+    e.birthDate,
+    e.color,
+    formatDateTimeAR(e.createdAt),
+  ]);
+
+  const dateStamp = getLocalDateKeyAR(new Date().toISOString());
+  downloadCsvFile(`EcoMapa_SantaMaria_Personal_${dateStamp}.csv`, headers, rows);
 }

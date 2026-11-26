@@ -2,7 +2,7 @@ import L from 'leaflet';
 import {Calendar, ChevronDown, ChevronUp, MapPin, Phone, User} from 'lucide-react';
 import React, {useEffect, useRef, useState} from 'react';
 import {CONTAINER_STATUS_META, SANTA_MARIA_CENTER} from '../constants';
-import {formatTimeAR, isTodayAR} from '../services/storage';
+import {formatDateTimeAR, groupContainersByLocation, isTodayAR} from '../services/storage';
 import type {
   ContainerRecord,
   Employee,
@@ -107,17 +107,18 @@ export const BottomTray: React.FC<BottomTrayProps> = ({
           .addTo(group);
       }
     } else {
-      for (const c of containers) {
-        if (c.lat === null || c.lng === null) continue;
-        const meta = CONTAINER_STATUS_META[c.status];
-        L.circleMarker([c.lat, c.lng], {
+      for (const item of groupContainersByLocation(containers)) {
+        const meta = CONTAINER_STATUS_META[item.latest.status];
+        L.circleMarker([item.lat, item.lng], {
           radius: 7,
           color: '#ffffff',
           weight: 2,
-          fillColor: meta.hex,
+          fillColor: '#0284C7',
           fillOpacity: 0.95,
         })
-          .bindTooltip(`${c.barrio} · ${meta.shortLabel} (${formatTimeAR(c.createdAt)})`)
+          .bindTooltip(
+            `${item.barrio} · ${meta.shortLabel} (${formatDateTimeAR(item.latest.createdAt)})`,
+          )
           .addTo(group);
       }
     }

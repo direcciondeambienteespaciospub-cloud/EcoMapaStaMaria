@@ -674,13 +674,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               <div>
                 <input
                   id="admin-master-key"
-                  aria-label="Ingresá la clave"
+                  aria-label="Ingresá la contraseña"
                   type="password"
                   autoFocus
                   required
                   value={adminPassword}
                   onChange={(e) => setAdminPassword(e.target.value)}
-                  placeholder="Ingresá la clave (defecto: ADMIN2026)"
+                  placeholder="Ingresá la contraseña"
                   className="min-h-[50px] w-full rounded-xl border border-slate-300 bg-white px-4 font-mono text-base text-slate-900 placeholder:font-sans placeholder:text-slate-400 focus:border-[#1B5E20] focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/20"
                 />
               </div>

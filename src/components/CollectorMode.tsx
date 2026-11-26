@@ -21,8 +21,10 @@ import {
 } from '../constants';
 import {
   compressImageToDataUrl,
+  escapeHtml,
   formatDateTimeAR,
   formatTimeAR,
+  groupContainersByLocation,
   isTodayAR,
 } from '../services/storage';
 import type {
@@ -86,6 +88,9 @@ export const CollectorMode: React.FC<CollectorModeProps> = ({
   const [formError, setFormError] = useState<string>('');
   const [systemNow, setSystemNow] = useState<string>(new Date().toISOString());
 
+  const [mapScope, setMapScope] = useState<'all' | 'today'>('all');
+  const [selectedSpotLabel, setSelectedSpotLabel] = useState<string>('');
+
   useEffect(() => {
     const id = window.setInterval(() => {
       setSystemNow(new Date().toISOString());
@@ -94,21 +99,45 @@ export const CollectorMode: React.FC<CollectorModeProps> = ({
   }, []);
 
   useEffect(() => {
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const pt: LatLngPoint = [pos.coords.latitude, pos.coords.longitude];
-          setCurrentEmpLoc(pt);
-          onUpdateCollectorLocation(pt);
-        },
-        () => {
-          onUpdateCollectorLocation(SANTA_MARIA_CENTER);
-        },
-        {timeout: 4000},
-      );
-    } else {
-      onUpdateCollectorLocation(SANTA_MARIA_CENTER);
+    let wakeLockSentinel: {release: () => Promise<void>} | null = null;
+    if ('wakeLock' in navigator) {
+      const navWithWakeLock = navigator as Navigator & {
+        wakeLock?: {request: (type: 'screen') => Promise<{release: () => Promise<void>}>};
+      };
+      void navWithWakeLock.wakeLock
+        ?.request('screen')
+        .then((sentinel) => {
+          wakeLockSentinel = sentinel;
+        })
+        .catch(() => {});
     }
+
+    if (!('geolocation' in navigator)) {
+      void onUpdateCollectorLocation(SANTA_MARIA_CENTER);
+      return () => {
+        if (wakeLockSentinel) void wakeLockSentinel.release().catch(() => {});
+      };
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        if (pos.coords.accuracy && pos.coords.accuracy > 65) return;
+        const pt: LatLngPoint = [pos.coords.latitude, pos.coords.longitude];
+        setCurrentEmpLoc(pt);
+        void onUpdateCollectorLocation(pt);
+      },
+      () => {
+        // Mantiene última ubicación conocida si falla momentáneamente el GPS
+      },
+      {enableHighAccuracy: true, maximumAge: 5000, timeout: 12000},
+    );
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+      if (wakeLockSentinel) {
+        void wakeLockSentinel.release().catch(() => {});
+      }
+    };
   }, [onUpdateCollectorLocation]);
 
   // Mapa en tiempo real mostrando TODOS los contenedores cargados simultáneamente + pin nuevo
@@ -146,37 +175,80 @@ export const CollectorMode: React.FC<CollectorModeProps> = ({
     };
   }, [onUpdateCollectorLocation]);
 
-  // Renderizar todos los contenedores en tiempo real + marcador del nuevo punto seleccionado
+  const containerGroups = useMemo(() => {
+    const baseGroups = groupContainersByLocation(containers);
+    if (mapScope === 'today') {
+      return baseGroups.filter((g) => g.hasTodayReport);
+    }
+    return baseGroups;
+  }, [containers, mapScope]);
+
+  // Renderizar contenedores fijos celestes en tiempo real + historial diario al hacer clic
   useEffect(() => {
     const group = layersGroupRef.current;
     const map = liveMapRef.current;
     if (!group || !map) return;
     group.clearLayers();
 
-    for (const c of containers) {
-      if (c.lat === null || c.lng === null) continue;
-      const meta = CONTAINER_STATUS_META[c.status];
+    for (const item of containerGroups) {
+      const latestMeta = CONTAINER_STATUS_META[item.latest.status];
+      const dotColor = item.hasTodayReport ? latestMeta.hex : '#94A3B8';
       const icon = L.divIcon({
-        className: 'collector-existing-pin',
-        html: `<div style="width:18px;height:18px;border-radius:5px;background:${meta.hex};border:2px solid #ffffff;box-shadow:0 2px 6px rgba(0,0,0,0.4);"></div>`,
-        iconSize: [18, 18],
-        iconAnchor: [9, 9],
+        className: 'collector-permanent-pin',
+        html: `<div style="position:relative;width:24px;height:24px;border-radius:7px;background:#0284C7;border:2px solid #ffffff;box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:11px;font-family:sans-serif;">C<span style="position:absolute;right:-4px;bottom:-4px;width:10px;height:10px;border-radius:9999px;background:${dotColor};border:2px solid #ffffff;"></span></div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
       });
-      const photoHtml = c.photoDataUrl
-        ? `<img src="${c.photoDataUrl}" alt="Foto contenedor" style="margin-top:6px;width:100%;max-height:110px;object-fit:cover;border-radius:6px;" />`
-        : '';
 
-      L.marker([c.lat, c.lng], {icon})
-        .bindPopup(
-          `<div style="font-family:sans-serif;min-width:170px;max-width:220px">
-            <strong>${c.barrio}</strong><br/>
-            <span style="font-size:12px">${c.reference}</span><br/>
-            <span style="color:${meta.hex};font-weight:700;font-size:12px">${meta.label}</span><br/>
-            <span style="font-size:11px;color:#475569">${c.employeeName} · ${formatTimeAR(c.createdAt)}</span>
+      const historyHtml = item.history
+        .slice(0, 12)
+        .map((h) => {
+          const meta = CONTAINER_STATUS_META[h.status];
+          const photoHtml = h.photoDataUrl
+            ? `<img src="${h.photoDataUrl}" alt="Foto" style="margin-top:4px;width:100%;max-height:80px;object-fit:cover;border-radius:6px;" />`
+            : '';
+          return `<div style="padding:6px 0;border-top:1px solid #e2e8f0;">
+            <div style="display:flex;justify-content:space-between;gap:6px;align-items:center;">
+              <span style="color:${meta.hex};font-weight:700;font-size:11px;">${escapeHtml(meta.shortLabel)}</span>
+              <span style="font-size:10px;color:#64748b;">${escapeHtml(formatDateTimeAR(h.createdAt))}</span>
+            </div>
+            <div style="font-size:11px;color:#334155;">${escapeHtml(h.employeeName)}</div>
+            <div style="font-size:11px;color:#475569;">${escapeHtml(h.comment)}</div>
             ${photoHtml}
-          </div>`,
-        )
-        .addTo(group);
+          </div>`;
+        })
+        .join('');
+
+      const btnId = `select-cont-${item.key.replace(/[^a-zA-Z0-9_-]/g, '')}`;
+      const popupHtml = `<div style="font-family:sans-serif;min-width:210px;max-width:250px;">
+        <div style="font-size:11px;font-weight:800;color:#0284C7;">CONTENEDOR FIJO · ${escapeHtml(item.barrio)}</div>
+        <div style="font-size:12px;font-weight:700;color:#0f172a;margin-top:2px;">${escapeHtml(item.reference)}</div>
+        <div style="font-size:11px;color:#475569;margin-top:2px;">${item.history.length} reporte(s) diarios · ${item.hasTodayReport ? 'Actualizado hoy' : 'Pendiente hoy'}</div>
+        <button id="${btnId}" type="button" style="margin-top:8px;width:100%;padding:7px 10px;border-radius:8px;border:none;background:#0284C7;color:#ffffff;font-weight:700;font-size:11px;cursor:pointer;">
+          Cargar reporte de hoy aquí
+        </button>
+        <div style="margin-top:8px;max-height:175px;overflow-y:auto;">${historyHtml}</div>
+      </div>`;
+
+      const marker = L.marker([item.lat, item.lng], {icon}).bindPopup(popupHtml);
+      marker.on('popupopen', () => {
+        const btn = document.getElementById(btnId);
+        if (btn) {
+          btn.onclick = () => {
+            setBarrio(item.barrio);
+            setReference(item.reference);
+            setCoords([item.lat, item.lng]);
+            setCurrentEmpLoc([item.lat, item.lng]);
+            setLocationMode('gps');
+            setSelectedSpotLabel(`${item.barrio} · ${item.reference}`);
+            setGpsFeedback('Contenedor fijo seleccionado. Elegí el estado de hoy y guardá.');
+            setSavedNotice('');
+            setFormError('');
+            marker.closePopup();
+          };
+        }
+      });
+      marker.addTo(group);
     }
 
     if (coords) {
@@ -187,11 +259,11 @@ export const CollectorMode: React.FC<CollectorModeProps> = ({
         iconAnchor: [13, 13],
       });
       L.marker(coords, {icon: selectedIcon})
-        .bindTooltip('Nuevo contenedor a registrar')
+        .bindTooltip(selectedSpotLabel ? 'Contenedor fijo seleccionado' : 'Nuevo contenedor a registrar')
         .addTo(group);
       map.panTo(coords, {animate: true});
     }
-  }, [containers, coords]);
+  }, [containerGroups, coords, selectedSpotLabel]);
 
   const myTodayRecords = useMemo(
     () =>
@@ -309,6 +381,7 @@ export const CollectorMode: React.FC<CollectorModeProps> = ({
       setComment('');
       setPhotoDataUrl(undefined);
       setCoords(null);
+      setSelectedSpotLabel('');
       setGpsFeedback('');
       setStatus('optimo');
       setSavedNotice(
@@ -358,6 +431,26 @@ export const CollectorMode: React.FC<CollectorModeProps> = ({
               >
                 <AlertTriangle className="h-5 w-5 shrink-0 text-red-700" />
                 <span>{formError}</span>
+              </div>
+            )}
+
+            {selectedSpotLabel && (
+              <div className="mt-4 flex items-center justify-between gap-2 rounded-2xl border border-sky-300 bg-sky-50 px-3.5 py-2.5 text-xs font-bold text-sky-950">
+                <span className="truncate">
+                  Actualizando contenedor fijo: {selectedSpotLabel}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedSpotLabel('');
+                    setCoords(null);
+                    setReference('');
+                    setGpsFeedback('');
+                  }}
+                  className="shrink-0 rounded-lg border border-sky-300 bg-white px-2.5 py-1 text-[11px] font-bold text-sky-900 hover:bg-sky-100 cursor-pointer"
+                >
+                  Cargar uno nuevo
+                </button>
               </div>
             )}
 
@@ -618,18 +711,41 @@ export const CollectorMode: React.FC<CollectorModeProps> = ({
           {/* Columna derecha: Mapa en tiempo real con todos los contenedores cargados + Historial del día */}
           <div className="space-y-6 lg:col-span-5">
             <section className="overflow-hidden rounded-3xl border border-emerald-950/15 bg-white shadow-xs">
-              <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-3.5">
                 <div>
                   <h2 className="font-display text-base font-bold text-slate-900">
-                    Contenedores en tiempo real
+                    Contenedores fijos ({containerGroups.length})
                   </h2>
                   <p className="text-xs text-slate-600">
-                    Tocá el mapa para fijar ubicación o inspeccionar registros cargados.
+                    Tocá un pin celeste para ver su historial diario y cargar el reporte de hoy.
                   </p>
                 </div>
-                <span className="font-mono text-xs font-bold text-[#1B5E20] tabular-nums">
-                  {containers.length} total
-                </span>
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex rounded-xl border border-emerald-900/10 bg-[#F1F8E9] p-0.5 text-xs font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setMapScope('all')}
+                      className={`rounded-lg px-2.5 py-1 transition-colors cursor-pointer ${
+                        mapScope === 'all'
+                          ? 'bg-[#0284C7] text-white'
+                          : 'text-slate-700 hover:text-slate-950'
+                      }`}
+                    >
+                      Fijos
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMapScope('today')}
+                      className={`rounded-lg px-2.5 py-1 transition-colors cursor-pointer ${
+                        mapScope === 'today'
+                          ? 'bg-[#1B5E20] text-white'
+                          : 'text-slate-700 hover:text-slate-950'
+                      }`}
+                    >
+                      Hoy
+                    </button>
+                  </div>
+                </div>
               </div>
               <div
                 ref={liveMapContainerRef}

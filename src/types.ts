@@ -67,6 +67,17 @@ export interface ContainerRecord {
   photoDataUrl?: string;
 }
 
+export interface ContainerGroup {
+  key: string;
+  lat: number;
+  lng: number;
+  barrio: string;
+  reference: string;
+  latest: ContainerRecord;
+  history: ContainerRecord[];
+  hasTodayReport: boolean;
+}
+
 export interface AppDatabase {
   employees: Employee[];
   adminProfile: AdminProfile;
